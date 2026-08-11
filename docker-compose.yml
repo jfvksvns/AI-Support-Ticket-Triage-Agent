@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ticket-triage-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=False
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=sqlite:///./tickets.db
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:?Error: CLAUDE_API_KEY not set}
+      - CLAUDE_MODEL=claude-opus-4-1
+      - ENABLE_CORS=True
+    volumes:
+      - ./backend/tickets.db:/app/tickets.db
+      - ./backend/app.log:/app/app.log
+    networks:
+      - triage-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    depends_on:
+      - db-init
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ticket-triage-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    networks:
+      - triage-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Database initialization (optional, one-time setup)
+  db-init:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    command: python -c "from app.database.engine import init_db; init_db(); print('Database initialized')"
+    networks:
+      - triage-network
+    environment:
+      - PYTHONUNBUFFERED=1
+
+networks:
+  triage-network:
+    driver: bridge
+
+volumes:
+  db-volume:
+    driver: local
+
+# Usage:
+# 1. Set environment variables:
+#    export CLAUDE_API_KEY="your-key-here"
+#
+# 2. Run the stack:
+#    docker-compose up -d
+#
+# 3. Access services:
+#    - Backend API: http://localhost:8000
+#    - Frontend: http://localhost:3000
+#    - API Docs: http://localhost:8000/api/docs
+#
+# 4. Stop the stack:
+#    docker-compose down
